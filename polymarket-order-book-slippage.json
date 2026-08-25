@@ -1,0 +1,122 @@
+{
+  "name": "Measure real slippage on Polymarket order books",
+  "nodes": [
+    {
+      "id": "form-trigger",
+      "name": "Market and order size",
+      "type": "n8n-nodes-base.formTrigger",
+      "position": [-220, 300],
+      "typeVersion": 2.3,
+      "parameters": {
+        "formTitle": "Polymarket slippage check",
+        "formDescription": "Enter a market slug and an order size. Returns what that order would actually have cost against the resting book, versus the midpoint.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Market slug",
+              "placeholder": "btc-updown-5m-1787597700",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Shares to buy",
+              "fieldType": "number",
+              "placeholder": "100",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Minutes before close",
+              "fieldType": "number",
+              "placeholder": "5",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "get-market",
+      "name": "Look up the market",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [0, 300],
+      "typeVersion": 4.3,
+      "parameters": {
+        "url": "=https://api.polyorderbooks.com/v1/markets/{{ $json['Market slug'] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.POLYORDERBOOKS_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "build-window",
+      "name": "Build the time window",
+      "type": "n8n-nodes-base.code",
+      "position": [220, 300],
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// The window ends at settlement and starts N minutes earlier. Near-settlement\n// is where slippage is worst, because depth thins as the outcome becomes clear.\nconst form = $('Market and order size').first().json;\nconst market = $input.first().json;\n\nconst end = new Date(market.end_date);\nconst minutes = Number(form['Minutes before close']) || 5;\nconst start = new Date(end.getTime() - minutes * 60_000);\n\nconst iso = (d) => d.toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n\nreturn [{\n  json: {\n    slug: market.slug,\n    question: market.question,\n    shares: Number(form['Shares to buy']) || 100,\n    start_ts: iso(start),\n    end_ts: iso(end),\n  },\n}];"
+      }
+    },
+    {
+      "id": "get-books",
+      "name": "Fetch the order books",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [440, 300],
+      "typeVersion": 4.3,
+      "parameters": {
+        "url": "=https://api.polyorderbooks.com/v1/markets/{{ $json.slug }}/books",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "start_ts", "value": "={{ $json.start_ts }}" },
+            { "name": "end_ts", "value": "={{ $json.end_ts }}" },
+            { "name": "resolution", "value": "1s" },
+            { "name": "limit", "value": "200" }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.POLYORDERBOOKS_API_KEY }}" }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "walk-book",
+      "name": "Walk the ladder",
+      "type": "n8n-nodes-base.code",
+      "position": [660, 300],
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// Fill the order against real resting size, level by level, and compare the\n// average fill price to the midpoint. The gap is the slippage a price series\n// cannot show you: the midpoint is where the market was, not where you could\n// have traded.\nconst ctx = $('Build the time window').first().json;\nconst books = $input.first().json;\nconst want = ctx.shares;\nconst out = [];\n\nfor (const [outcome, snapshots] of Object.entries(books.data ?? {})) {\n  for (const snap of snapshots) {\n    const asks = snap.asks ?? [];\n    const bids = snap.bids ?? [];\n\n    // Binary markets go one-sided as they resolve. Nothing to fill against.\n    if (asks.length === 0) {\n      out.push({ json: { outcome, t: snap.t, fillable: false, reason: 'no asks resting' } });\n      continue;\n    }\n\n    const bestAsk = asks[0][0];\n    const bestBid = bids.length ? bids[0][0] : null;\n    const mid = bestBid === null ? bestAsk : (bestBid + bestAsk) / 2;\n\n    let remaining = want;\n    let cost = 0;\n    let filled = 0;\n    let levels = 0;\n\n    for (const [price, size] of asks) {\n      if (remaining <= 0) break;\n      const take = Math.min(remaining, size);\n      cost += take * price;\n      filled += take;\n      remaining -= take;\n      levels += 1;\n    }\n\n    const avg = filled > 0 ? cost / filled : null;\n\n    out.push({\n      json: {\n        outcome,\n        t: snap.t,\n        fillable: remaining <= 0,\n        shares_requested: want,\n        shares_filled: Number(filled.toFixed(2)),\n        levels_consumed: levels,\n        best_bid: bestBid,\n        best_ask: bestAsk,\n        midpoint: mid === null ? null : Number(mid.toFixed(4)),\n        avg_fill_price: avg === null ? null : Number(avg.toFixed(4)),\n        total_cost: Number(cost.toFixed(2)),\n        slippage_vs_mid_pct:\n          avg !== null && mid ? Number((((avg - mid) / mid) * 100).toFixed(2)) : null,\n      },\n    });\n  }\n}\n\nreturn out;"
+      }
+    },
+    {
+      "id": "summarise",
+      "name": "Summarise",
+      "type": "n8n-nodes-base.code",
+      "position": [880, 300],
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One row per outcome so the result is readable rather than 600 snapshots.\nconst rows = $input.all().map((i) => i.json);\nconst byOutcome = {};\n\nfor (const r of rows) {\n  (byOutcome[r.outcome] ??= []).push(r);\n}\n\nreturn Object.entries(byOutcome).map(([outcome, rs]) => {\n  const priced = rs.filter((r) => r.slippage_vs_mid_pct !== null);\n  const unfillable = rs.filter((r) => !r.fillable).length;\n  const slips = priced.map((r) => r.slippage_vs_mid_pct).sort((a, b) => a - b);\n  const worst = priced.reduce((a, b) => (a && a.slippage_vs_mid_pct > b.slippage_vs_mid_pct ? a : b), null);\n\n  return {\n    json: {\n      outcome,\n      snapshots: rs.length,\n      could_not_fill: unfillable,\n      could_not_fill_pct: Number(((unfillable / rs.length) * 100).toFixed(1)),\n      median_slippage_pct: slips.length ? slips[Math.floor(slips.length / 2)] : null,\n      worst_slippage_pct: worst ? worst.slippage_vs_mid_pct : null,\n      worst_at: worst ? worst.t : null,\n    },\n  };\n});"
+      }
+    }
+  ],
+  "connections": {
+    "Market and order size": { "main": [[{ "node": "Look up the market", "type": "main", "index": 0 }]] },
+    "Look up the market": { "main": [[{ "node": "Build the time window", "type": "main", "index": 0 }]] },
+    "Build the time window": { "main": [[{ "node": "Fetch the order books", "type": "main", "index": 0 }]] },
+    "Fetch the order books": { "main": [[{ "node": "Walk the ladder", "type": "main", "index": 0 }]] },
+    "Walk the ladder": { "main": [[{ "node": "Summarise", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false }
+}
