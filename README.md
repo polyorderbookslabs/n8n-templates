@@ -69,6 +69,27 @@ snapshots across 805 resolved markets are published under CC BY 4.0 with a DOI:
 [10.5281/zenodo.22084114](https://doi.org/10.5281/zenodo.22084114). The same
 ladder-walking logic runs fine on those Parquet files.
 
+## Links
+
+- [polyorderbooks.com](https://polyorderbooks.com) — the API
+- [docs.polyorderbooks.com](https://docs.polyorderbooks.com) — endpoint reference,
+  parameters and response shapes
+- [Order book data explained](https://polyorderbooks.com/polymarket-order-book-data)
+  — what an L2 snapshot contains, with a worked slippage example
+- [All datasets](https://polyorderbooks.com/datasets) — every free download,
+  including the DOI-carrying research dataset
+- [Python client](https://pypi.org/project/polyorderbooks/) — `pip install polyorderbooks`
+- [MCP server](https://github.com/polyorderbooks/mcp-server) — the same data in
+  Claude, Cursor and other MCP clients
+
+## Questions
+
+Open an issue on this repository for anything about the workflows themselves.
+
+For the API — a plan, a coverage question, a window these files do not reach —
+email **contact@polyorderbooks.com**. Bug reports against the API are welcome and
+usually answered the same day.
+
 ## Licence
 
-MIT.
+MIT. Not affiliated with, endorsed by, or connected to Polymarket or n8n.
