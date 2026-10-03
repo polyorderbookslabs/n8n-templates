@@ -79,7 +79,7 @@ ladder-walking logic runs fine on those Parquet files.
 - [All datasets](https://polyorderbooks.com/datasets) — every free download,
   including the DOI-carrying research dataset
 - [Python client](https://pypi.org/project/polyorderbooks/) — `pip install polyorderbooks`
-- [MCP server](https://github.com/poly-orderbooks/mcp-server) — the same data in
+- [MCP server](https://github.com/polyorderbookslabs/mcp-server) — the same data in
   Claude, Cursor and other MCP clients
 
 ## Questions
