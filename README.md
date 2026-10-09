@@ -1,7 +1,7 @@
 # n8n templates for Polymarket order book data
 
 Workflows for [n8n](https://n8n.io) that use historical Polymarket **order book
-depth** — the resting bids and asks at every price level, at 1-second
+depth** — the resting bids and asks at every price level, at 250ms
 resolution.
 
 ## Why these are different from the other Polymarket templates
@@ -47,7 +47,7 @@ much size was resting.
 1. Import the JSON into n8n.
 2. Set `POLYORDERBOOKS_API_KEY` as an environment variable on your n8n instance.
    Get a free key at [polyorderbooks.com/signup](https://polyorderbooks.com/signup)
-   — the free tier queries at the same 1-second resolution as paid plans.
+   — the free tier queries at the same 250ms resolution as paid plans.
 3. Run the form trigger and enter a market slug, e.g. `btc-updown-5m-1787597700`.
 
 ### Notes
@@ -57,7 +57,7 @@ so some snapshots have no asks to fill against. The workflow reports those as
 `could_not_fill` rather than silently skipping them, because "you could not have
 traded at all" is usually the more interesting answer.
 
-Keep the window short. The workflow requests 1-second resolution, which is 60
+Keep the window short. The workflow requests 250ms resolution, which is 240
 snapshots per minute per outcome.
 
 ---
